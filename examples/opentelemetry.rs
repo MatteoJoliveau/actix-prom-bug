@@ -1,13 +1,15 @@
 use actix_web::{App, get, HttpResponse, HttpServer, web::Data};
-use prometheus::{Encoder, TextEncoder, Counter, Registry};
+use opentelemetry::{global, KeyValue, metrics::MetricsError};
+use opentelemetry_prometheus::PrometheusExporter;
+use prometheus::{Encoder, TextEncoder};
 
 #[get("/metrics")]
-pub async fn metrics(registry: Data<Registry>) -> HttpResponse {
+pub async fn metrics(exporter: Data<PrometheusExporter>) -> HttpResponse {
     let encoder = TextEncoder::new();
-    let metric_families = registry.gather();
+    let metric_families = exporter.registry().gather();
     let mut buf = Vec::new();
     if let Err(err) = encoder.encode(&metric_families[..], &mut buf) {
-        return HttpResponse::InternalServerError().body(err.to_string())
+        global::handle_error(MetricsError::Other(err.to_string()));
     }
 
     let body = String::from_utf8(buf).unwrap_or_default();
@@ -17,8 +19,10 @@ pub async fn metrics(registry: Data<Registry>) -> HttpResponse {
 }
 
 #[get("/greet")]
-pub async fn greet(counter: Data<Counter>) -> HttpResponse {
-    counter.inc();
+pub async fn greet() -> HttpResponse {
+    let meter = global::meter("greeter");
+    let counter = meter.u64_counter("greets_total").init();
+    counter.add(1, &[KeyValue::new("name", "world")]);
     HttpResponse::Ok()
         .set_header(http::header::CONTENT_TYPE, "text/plain")
         .body("hello world!")
@@ -26,13 +30,9 @@ pub async fn greet(counter: Data<Counter>) -> HttpResponse {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let counter = Counter::new("world", "world help").expect("counter");
-    let registry = Registry::new();
-    registry.register(Box::new(counter.clone())).expect("register counter");
-
+    let exporter = opentelemetry_prometheus::exporter().init();
     HttpServer::new(move || App::new()
-        .data(registry.clone())
-        .data(counter.clone())
+        .data(exporter.clone())
         .service(metrics)
         .service(greet))
         .bind("localhost:8080")?

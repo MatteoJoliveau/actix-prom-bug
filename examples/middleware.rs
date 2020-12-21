@@ -4,9 +4,9 @@ use opentelemetry::{global, KeyValue};
 
 #[get("/greet")]
 pub async fn greet() -> HttpResponse {
-    // let meter = global::meter("greeter");
-    // let counter = meter.u64_counter("greets_total").init();
-    // counter.add(1, &[KeyValue::new("name", "world")]);
+    let meter = global::meter("greeter");
+    let counter = meter.u64_counter("greets_total").init();
+    counter.add(1, &[KeyValue::new("name", "world")]);
     HttpResponse::Ok()
         .set_header(http::header::CONTENT_TYPE, "text/plain")
         .body("hello world!")
